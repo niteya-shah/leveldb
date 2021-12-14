@@ -4,15 +4,15 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#ifdef USE_UMAP
+#include <iostream>
+#include <umap.h>
+#else
 #include <sys/mman.h>
+#endif
 #ifndef __Fuchsia__
 #include <sys/resource.h>
 #endif
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
-
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
@@ -24,13 +24,18 @@
 #include <queue>
 #include <set>
 #include <string>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <thread>
 #include <type_traits>
+#include <unistd.h>
 #include <utility>
 
 #include "leveldb/env.h"
 #include "leveldb/slice.h"
 #include "leveldb/status.h"
+
 #include "port/port.h"
 #include "port/thread_annotations.h"
 #include "util/env_posix_test_helper.h"
@@ -218,14 +223,27 @@ class PosixMmapReadableFile final : public RandomAccessFile {
   // aquired the right to use one mmap region, which will be released when this
   // instance is destroyed.
   PosixMmapReadableFile(std::string filename, char* mmap_base, size_t length,
-                        Limiter* mmap_limiter)
+                        Limiter* mmap_limiter,
+#ifdef USE_UMAP
+                        int fd
+#endif
+                        )
       : mmap_base_(mmap_base),
         length_(length),
         mmap_limiter_(mmap_limiter),
-        filename_(std::move(filename)) {}
+        filename_(std::move(filename)) {
+#ifdef USE_UMAP
+    fd_ = fd;
+#endif
+  }
 
   ~PosixMmapReadableFile() override {
+#ifdef USE_UMAP
+    ::uunmap(static_cast<void*>(mmap_base_), length_);
+    ::close(fd_);
+#else
     ::munmap(static_cast<void*>(mmap_base_), length_);
+#endif
     mmap_limiter_->Release();
   }
 
@@ -245,6 +263,9 @@ class PosixMmapReadableFile final : public RandomAccessFile {
   const size_t length_;
   Limiter* const mmap_limiter_;
   const std::string filename_;
+#ifdef USE_UMAP
+  int fd_;
+#endif
 };
 
 class PosixWritableFile final : public WritableFile {
@@ -513,6 +534,21 @@ class PosixEnv : public Env {
   Status NewRandomAccessFile(const std::string& filename,
                              RandomAccessFile** result) override {
     *result = nullptr;
+#ifdef USE_UMAP
+    uint64_t fs;
+    GetFileSize(filename, &fs);
+    int fde = ::open(filename.c_str(), O_RDWR);
+    char* ps = getenv("UMAP_PAGESIZE");
+    uint64_t pagesize = 4096;
+    if (ps != nullptr) pagesize = atoi(ps);
+    fs = (fs % pagesize == 0) ? fs : (fs + (pagesize - fs % pagesize));
+    if (::ftruncate(fde, fs) == -1) {
+      printf("Page Size:%lu Aligned size%lu\n", pagesize, fs);
+      printf("%i\n", errno);
+      return PosixError(filename, errno);
+    }
+    ::close(fde);
+#endif
     int fd = ::open(filename.c_str(), O_RDONLY | kOpenBaseFlags);
     if (fd < 0) {
       return PosixError(filename, errno);
@@ -526,17 +562,28 @@ class PosixEnv : public Env {
     uint64_t file_size;
     Status status = GetFileSize(filename, &file_size);
     if (status.ok()) {
+#ifdef USE_UMAP
+      void* mmap_base =
+          ::umap(/*addr=*/nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+#else
       void* mmap_base =
           ::mmap(/*addr=*/nullptr, file_size, PROT_READ, MAP_SHARED, fd, 0);
+#endif
       if (mmap_base != MAP_FAILED) {
         *result = new PosixMmapReadableFile(filename,
                                             reinterpret_cast<char*>(mmap_base),
-                                            file_size, &mmap_limiter_);
+                                            file_size, &mmap_limiter_,
+#ifdef USE_UMAP
+                                            fd
+#endif
+        );
       } else {
         status = PosixError(filename, errno);
       }
     }
+#ifndef USE_UMAP
     ::close(fd);
+#endif
     if (!status.ok()) {
       mmap_limiter_.Release();
     }

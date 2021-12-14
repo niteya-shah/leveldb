@@ -230,10 +230,15 @@ target_sources(leveldb
     "helpers/memenv/memenv.h"
 )
 
+message(STATUS $ENV{UMAP_INCL})
+message(STATUS $ENV{UMAP_LIB})
+
+add_compile_definitions(USE_UMAP TRUE)
 target_include_directories(leveldb
   PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    $ENV{UMAP_INCL}
 )
 
 set_target_properties(leveldb
@@ -276,6 +281,8 @@ endif(HAVE_SNAPPY)
 if(HAVE_TCMALLOC)
   target_link_libraries(leveldb tcmalloc)
 endif(HAVE_TCMALLOC)
+
+target_link_libraries(leveldb -L$ENV{UMAP_LIB} -lumap)
 
 # Needed by port_stdcxx.h
 find_package(Threads REQUIRED)
