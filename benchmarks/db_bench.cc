@@ -58,9 +58,7 @@ static const char* FLAGS_benchmarks =
     "readseq,"
     "readreverse,"
     "fill100K,"
-    "crc32c,"
-    "snappycomp,"
-    "snappyuncomp,";
+    "crc32c,";
 
 // Number of key/values to place in database
 static int FLAGS_num = 1000000;
@@ -491,7 +489,7 @@ class Benchmark {
   }
 
   void Run() {
-    PrintHeader();
+    // PrintHeader();
     Open();
 
     const char* benchmarks = FLAGS_benchmarks;
@@ -693,7 +691,7 @@ class Benchmark {
   void Crc32c(ThreadState* thread) {
     // Checksum about 500MB of data total
     const int size = 4096;
-    const char* label = "(4K per op)";
+    const char* label = "";
     std::string data(size, 'x');
     int64_t bytes = 0;
     uint32_t crc = 0;
@@ -792,8 +790,8 @@ class Benchmark {
 
   void DoWrite(ThreadState* thread, bool seq) {
     if (num_ != FLAGS_num) {
-      char msg[100];
-      std::snprintf(msg, sizeof(msg), "(%d ops)", num_);
+      char msg[100] = "";
+      // std::snprintf(msg, sizeof(msg), "(%d ops)", num_);
       thread->stats.AddMessage(msg);
     }
 
@@ -859,8 +857,8 @@ class Benchmark {
       }
       thread->stats.FinishedSingleOp();
     }
-    char msg[100];
-    std::snprintf(msg, sizeof(msg), "(%d of %d found)", found, num_);
+    char msg[100] = "";
+    // std::snprintf(msg, sizeof(msg), "(%d of %d found)", found, num_);
     thread->stats.AddMessage(msg);
   }
 
